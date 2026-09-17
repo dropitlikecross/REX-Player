@@ -471,17 +471,62 @@ object CoreMediaScanner {
         context: Context,
         rawMedia: MutableMap<String, MutableList<ScannedItem>>
     ) {
+        val scannedPaths = mutableSetOf<String>()
+
+        // Scan volumes from StorageManager
         try {
             val allVolumes = StorageVolumeUtils.getAllStorageVolumes(context)
             for (volume in allVolumes) {
                 val volumePath = StorageVolumeUtils.getVolumePath(volume) ?: continue
                 val volumeDir = File(volumePath)
                 if (volumeDir.exists() && volumeDir.canRead()) {
-                    recursiveFileSystemScan(volumeDir, rawMedia, 0)
+                    val canonicalPath = runCatching { volumeDir.canonicalPath }.getOrElse { volumeDir.absolutePath }
+                    if (scannedPaths.add(canonicalPath)) {
+                        Log.d(TAG, "Scanning volume: $canonicalPath")
+                        recursiveFileSystemScan(volumeDir, rawMedia, 0)
+                    }
                 }
             }
         } catch (e: Exception) {
             Log.e(TAG, "Storage volume scan error", e)
+        }
+
+        // Fallback: scan common storage locations that might be missed
+        val fallbackPaths = listOf(
+            android.os.Environment.getExternalStorageDirectory(),
+            File("/storage/emulated/0"),
+            File("/sdcard")
+        )
+        for (fallbackDir in fallbackPaths) {
+            try {
+                if (fallbackDir.exists() && fallbackDir.canRead()) {
+                    val canonicalPath = runCatching { fallbackDir.canonicalPath }.getOrElse { fallbackDir.absolutePath }
+                    if (scannedPaths.add(canonicalPath)) {
+                        Log.d(TAG, "Scanning fallback path: $canonicalPath")
+                        recursiveFileSystemScan(fallbackDir, rawMedia, 0)
+                    }
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Fallback path scan error: ${fallbackDir.absolutePath}", e)
+            }
+        }
+
+        // Scan external SD cards via common mount points
+        val storageDirs = listOf(File("/storage"), File("/mnt/media_rw"))
+        for (storageDir in storageDirs) {
+            try {
+                storageDir.listFiles()?.forEach { mount ->
+                    if (mount.isDirectory && mount.canRead() && mount.name != "emulated" && mount.name != "self") {
+                        val canonicalPath = runCatching { mount.canonicalPath }.getOrElse { mount.absolutePath }
+                        if (scannedPaths.add(canonicalPath)) {
+                            Log.d(TAG, "Scanning external storage: $canonicalPath")
+                            recursiveFileSystemScan(mount, rawMedia, 0)
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "External storage scan error: ${storageDir.absolutePath}", e)
+            }
         }
     }
 
