@@ -1,4 +1,4 @@
-name: CI Release Build
+name: CI Preview Build
 
 on:
   workflow_dispatch:
@@ -32,15 +32,15 @@ jobs:
       - name: Make gradlew executable
         run: chmod +x ./gradlew
 
-      - name: Build release APKs with Gradle
-        run: ./gradlew assembleRelease --stacktrace
+      - name: Build preview APKs with Gradle
+        run: ./gradlew assemblePreview --stacktrace
 
       - name: Sign APKs
         run: |
           set -e
-          RELEASE_DIR="app/build/outputs/apk/release"
+          RELEASE_DIR="app/build/outputs/apk/preview"
 
-          APK_COUNT=$(find "$RELEASE_DIR" -name "app-*-release-unsigned.apk" -type f | wc -l)
+          APK_COUNT=$(find "$RELEASE_DIR" -name "app-*-preview-unsigned.apk" -type f | wc -l)
           if [ "$APK_COUNT" -eq 0 ]; then
             echo "No unsigned APK files found"
             ls -lah "$RELEASE_DIR"
@@ -78,7 +78,7 @@ jobs:
           APKSIGNER=$(find $ANDROID_HOME/build-tools -name apksigner | sort -V | tail -n 1)
           echo "Using apksigner: $APKSIGNER"
 
-          find "$RELEASE_DIR" -name "app-*-release-unsigned.apk" -type f | while read -r apk; do
+          find "$RELEASE_DIR" -name "app-*-preview-unsigned.apk" -type f | while read -r apk; do
             signed_apk="${apk/-unsigned/}"
 
             $APKSIGNER sign \
@@ -94,7 +94,7 @@ jobs:
           done
 
           rm release.keystore
-          ls -lh "$RELEASE_DIR"/app-*-release.apk
+          ls -lh "$RELEASE_DIR"/app-*-preview.apk
 
       - name: Prepare artifacts
         run: |
@@ -102,8 +102,8 @@ jobs:
           mkdir -p output
           apks=("universal" "arm64-v8a" "armeabi-v7a" "x86" "x86_64")
           for abi in "${apks[@]}"; do
-            src="app/build/outputs/apk/release/app-${abi}-release.apk"
-            dst="output/REX-Player-${abi}-${{ env.SHORT_SHA }}.apk"
+            src="app/build/outputs/apk/preview/app-${abi}-preview.apk"
+            dst="output/REX-Player-Preview-${abi}-${{ env.SHORT_SHA }}.apk"
             if [ -f "$src" ]; then
               cp "$src" "$dst"
             fi
@@ -113,29 +113,29 @@ jobs:
       - name: Upload app-arm64-v8a Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: REX-Player-arm64-v8a-signed-${{ env.SHORT_SHA }}
-          path: output/REX-Player-arm64-v8a-${{ env.SHORT_SHA }}.apk
+          name: REX-Player-Preview-arm64-v8a-${{ env.SHORT_SHA }}
+          path: output/REX-Player-Preview-arm64-v8a-${{ env.SHORT_SHA }}.apk
 
       - name: Upload app-armeabi-v7a Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: REX-Player-armeabi-v7a-signed-${{ env.SHORT_SHA }}
-          path: output/REX-Player-armeabi-v7a-${{ env.SHORT_SHA }}.apk
+          name: REX-Player-Preview-armeabi-v7a-${{ env.SHORT_SHA }}
+          path: output/REX-Player-Preview-armeabi-v7a-${{ env.SHORT_SHA }}.apk
 
       - name: Upload app-universal Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: REX-Player-universal-signed-${{ env.SHORT_SHA }}
-          path: output/REX-Player-universal-${{ env.SHORT_SHA }}.apk
+          name: REX-Player-Preview-universal-${{ env.SHORT_SHA }}
+          path: output/REX-Player-Preview-universal-${{ env.SHORT_SHA }}.apk
 
       - name: Upload app-x86 Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: REX-Player-x86-signed-${{ env.SHORT_SHA }}
-          path: output/REX-Player-x86-${{ env.SHORT_SHA }}.apk
+          name: REX-Player-Preview-x86-${{ env.SHORT_SHA }}
+          path: output/REX-Player-Preview-x86-${{ env.SHORT_SHA }}.apk
 
       - name: Upload app-x86_64 Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: REX-Player-x86_64-signed-${{ env.SHORT_SHA }}
-          path: output/REX-Player-x86_64-${{ env.SHORT_SHA }}.apk
+          name: REX-Player-Preview-x86_64-${{ env.SHORT_SHA }}
+          path: output/REX-Player-Preview-x86_64-${{ env.SHORT_SHA }}.apk
