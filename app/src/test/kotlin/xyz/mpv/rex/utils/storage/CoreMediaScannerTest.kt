@@ -31,7 +31,7 @@ class CoreMediaScannerTest {
     every { browserPreferences.watchedThreshold.get() } returns 95
 
     mockkObject(StorageVolumeUtils)
-    every { StorageVolumeUtils.getExternalStorageVolumes(any()) } returns listOf(mockVolume)
+    every { StorageVolumeUtils.getAllStorageVolumes(any()) } returns listOf(mockVolume)
     every { StorageVolumeUtils.getVolumePath(mockVolume) } returns tempDir.absolutePath
 
     startKoin {

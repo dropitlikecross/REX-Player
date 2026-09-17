@@ -316,9 +316,9 @@ object CoreMediaScanner {
 
         // Step 1: MediaStore Scan
         scanMediaStore(context, rawMediaByFolder)
-        
-        // Step 2: Filesystem Scan for external volumes
-        scanExternalVolumes(context, rawMediaByFolder)
+
+        // Step 2: Filesystem Scan for all storage volumes (internal + external)
+        scanAllStorageVolumes(context, rawMediaByFolder)
 
         val currentTime = System.currentTimeMillis()
         val thresholdMillis = thresholdDays * 24 * 60 * 60 * 1000L
@@ -467,13 +467,13 @@ object CoreMediaScanner {
         }
     }
 
-    private fun scanExternalVolumes(
+    private fun scanAllStorageVolumes(
         context: Context,
         rawMedia: MutableMap<String, MutableList<ScannedItem>>
     ) {
         try {
-            val externalVolumes = StorageVolumeUtils.getExternalStorageVolumes(context)
-            for (volume in externalVolumes) {
+            val allVolumes = StorageVolumeUtils.getAllStorageVolumes(context)
+            for (volume in allVolumes) {
                 val volumePath = StorageVolumeUtils.getVolumePath(volume) ?: continue
                 val volumeDir = File(volumePath)
                 if (volumeDir.exists() && volumeDir.canRead()) {
@@ -481,7 +481,7 @@ object CoreMediaScanner {
                 }
             }
         } catch (e: Exception) {
-            Log.e(TAG, "External volume scan error", e)
+            Log.e(TAG, "Storage volume scan error", e)
         }
     }
 
@@ -492,8 +492,11 @@ object CoreMediaScanner {
     ) {
         if (depth > 20) return // Safety limit
         val files = directory.listFiles() ?: return
-        
-        val itemsInFolder = mutableListOf<ScannedItem>()
+
+        val path = directory.absolutePath
+        val existingItems = rawMedia[path]
+        val existingPaths = existingItems?.map { it.path }?.toSet() ?: emptySet()
+
         for (file in files) {
             if (file.isDirectory) {
                 if (!FileFilterUtils.shouldSkipFolder(file)) {
@@ -501,25 +504,20 @@ object CoreMediaScanner {
                 }
             } else if (file.isFile) {
                 if (FileTypeUtils.isMediaFile(file)) {
-                    itemsInFolder.add(
-                        ScannedItem(
-                            name = file.name,
-                            path = file.absolutePath,
-                            size = file.length(),
-                            duration = 0, // Filesystem doesn't give duration
-                            dateModified = file.lastModified() / 1000,
-                            isAudio = FileTypeUtils.isAudioFile(file)
+                    val filePath = file.absolutePath
+                    if (filePath !in existingPaths) {
+                        rawMedia.getOrPut(path) { mutableListOf() }.add(
+                            ScannedItem(
+                                name = file.name,
+                                path = filePath,
+                                size = file.length(),
+                                duration = 0, // Filesystem doesn't give duration
+                                dateModified = file.lastModified() / 1000,
+                                isAudio = FileTypeUtils.isAudioFile(file)
+                            )
                         )
-                    )
+                    }
                 }
-            }
-        }
-        
-        if (itemsInFolder.isNotEmpty()) {
-            val path = directory.absolutePath
-            // Only add if MediaStore didn't already pick up this folder
-            if (!rawMedia.containsKey(path)) {
-                rawMedia[path] = itemsInFolder
             }
         }
     }
