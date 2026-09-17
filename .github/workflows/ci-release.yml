@@ -40,14 +40,39 @@ jobs:
           set -e
           RELEASE_DIR="app/build/outputs/apk/release"
 
-          echo "${{ secrets.SIGNING_KEYSTORE }}" | base64 -d > release.keystore
-
           APK_COUNT=$(find "$RELEASE_DIR" -name "app-*-release-unsigned.apk" -type f | wc -l)
           if [ "$APK_COUNT" -eq 0 ]; then
             echo "No unsigned APK files found"
             ls -lah "$RELEASE_DIR"
-            rm release.keystore
             exit 1
+          fi
+
+          # Try to use secrets keystore, fallback to self-signed
+          USE_SELF_SIGNED=false
+          if [ -n "${{ secrets.SIGNING_KEYSTORE }}" ]; then
+            echo "${{ secrets.SIGNING_KEYSTORE }}" | base64 -d > release.keystore 2>/dev/null || USE_SELF_SIGNED=true
+          else
+            USE_SELF_SIGNED=true
+          fi
+
+          if [ "$USE_SELF_SIGNED" = true ]; then
+            echo "Generating self-signed keystore..."
+            keytool -genkeypair \
+              -alias rex-release \
+              -keyalg RSA \
+              -keysize 2048 \
+              -validity 10000 \
+              -keystore release.keystore \
+              -storepass android123 \
+              -keypass android123 \
+              -dname "CN=REX Player, OU=Development, O=REX, L=Unknown, ST=Unknown, C=US"
+            KEY_ALIAS="rex-release"
+            STORE_PASS="android123"
+            KEY_PASS="android123"
+          else
+            KEY_ALIAS="${{ secrets.SIGNING_KEY_ALIAS }}"
+            STORE_PASS="${{ secrets.SIGNING_STORE_PASSWORD }}"
+            KEY_PASS="${{ secrets.KEY_PASSWORD }}"
           fi
 
           APKSIGNER=$(find $ANDROID_HOME/build-tools -name apksigner | sort -V | tail -n 1)
@@ -58,9 +83,9 @@ jobs:
 
             $APKSIGNER sign \
               --ks release.keystore \
-              --ks-key-alias "${{ secrets.SIGNING_KEY_ALIAS }}" \
-              --ks-pass "pass:${{ secrets.SIGNING_STORE_PASSWORD }}" \
-              --key-pass "pass:${{ secrets.KEY_PASSWORD }}" \
+              --ks-key-alias "$KEY_ALIAS" \
+              --ks-pass "pass:$STORE_PASS" \
+              --key-pass "pass:$KEY_PASS" \
               --out "$signed_apk" \
               "$apk"
 
