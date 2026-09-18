@@ -528,6 +528,30 @@ object CoreMediaScanner {
                 Log.w(TAG, "External storage scan error: ${storageDir.absolutePath}", e)
             }
         }
+
+        // Additional fallback: use context to find external storage directories
+        try {
+            val externalDirs = context.getExternalFilesDirs(null)
+            for (extDir in externalDirs) {
+                if (extDir == null) continue
+                // Go up to the storage root (e.g., from /storage/emulated/0/Android/data/pkg/files to /storage/emulated/0)
+                var storageRoot = extDir
+                while (storageRoot.parentFile != null && storageRoot.parentFile?.name != "storage" && storageRoot.parentFile?.absolutePath != "/") {
+                    storageRoot = storageRoot.parentFile!!
+                }
+                if (storageRoot.exists() && storageRoot.canRead()) {
+                    val canonicalPath = runCatching { storageRoot.canonicalPath }.getOrElse { storageRoot.absolutePath }
+                    if (scannedPaths.add(canonicalPath)) {
+                        Log.d(TAG, "Scanning context-discovered storage: $canonicalPath")
+                        recursiveFileSystemScan(storageRoot, rawMedia, 0)
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Context storage discovery error", e)
+        }
+
+        Log.d(TAG, "Filesystem scan complete. Scanned ${scannedPaths.size} storage roots. Total folders with media: ${rawMedia.size}")
     }
 
     private fun recursiveFileSystemScan(
@@ -536,34 +560,61 @@ object CoreMediaScanner {
         depth: Int
     ) {
         if (depth > 20) return // Safety limit
-        val files = directory.listFiles() ?: return
+
+        val files = try {
+            directory.listFiles()
+        } catch (e: SecurityException) {
+            Log.w(TAG, "Security exception listing: ${directory.absolutePath}")
+            null
+        }
+
+        if (files == null) {
+            if (depth == 0) {
+                Log.w(TAG, "Cannot list directory (null): ${directory.absolutePath}, canRead=${directory.canRead()}, exists=${directory.exists()}")
+            }
+            return
+        }
+
+        if (depth == 0) {
+            Log.d(TAG, "Scanning root ${directory.absolutePath}: ${files.size} items")
+        }
 
         val path = directory.absolutePath
         val existingItems = rawMedia[path]
         val existingPaths = existingItems?.map { it.path }?.toSet() ?: emptySet()
 
+        var mediaFoundInDir = 0
         for (file in files) {
-            if (file.isDirectory) {
-                if (!FileFilterUtils.shouldSkipFolder(file)) {
-                    recursiveFileSystemScan(file, rawMedia, depth + 1)
-                }
-            } else if (file.isFile) {
-                if (FileTypeUtils.isMediaFile(file)) {
-                    val filePath = file.absolutePath
-                    if (filePath !in existingPaths) {
-                        rawMedia.getOrPut(path) { mutableListOf() }.add(
-                            ScannedItem(
-                                name = file.name,
-                                path = filePath,
-                                size = file.length(),
-                                duration = 0, // Filesystem doesn't give duration
-                                dateModified = file.lastModified() / 1000,
-                                isAudio = FileTypeUtils.isAudioFile(file)
+            try {
+                if (file.isDirectory) {
+                    if (!FileFilterUtils.shouldSkipFolder(file)) {
+                        recursiveFileSystemScan(file, rawMedia, depth + 1)
+                    }
+                } else if (file.isFile) {
+                    if (FileTypeUtils.isMediaFile(file)) {
+                        val filePath = file.absolutePath
+                        if (filePath !in existingPaths) {
+                            rawMedia.getOrPut(path) { mutableListOf() }.add(
+                                ScannedItem(
+                                    name = file.name,
+                                    path = filePath,
+                                    size = file.length(),
+                                    duration = 0, // Filesystem doesn't give duration
+                                    dateModified = file.lastModified() / 1000,
+                                    isAudio = FileTypeUtils.isAudioFile(file)
+                                )
                             )
-                        )
+                            mediaFoundInDir++
+                        }
                     }
                 }
+            } catch (e: Exception) {
+                Log.w(TAG, "Error processing ${file.absolutePath}: ${e.message}")
             }
+        }
+
+        if (mediaFoundInDir > 0 && depth <= 2) {
+            Log.d(TAG, "Found $mediaFoundInDir new media files in: $path")
         }
     }
 
